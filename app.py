@@ -1,23 +1,19 @@
 from flask import Flask, request, jsonify
-from pyspark.ml.classification import LogisticRegressionModel
-from pyspark.ml.feature import VectorAssembler
-from pyspark.sql import SparkSession
-import pandas as pd
-from xgboost import XGBRegressor
-import joblib
 import numpy as np
-
-# Initialize Spark Session
-spark = SparkSession.builder.appName("ModelAPI").getOrCreate()
+import joblib
+import xgboost as xgb
 
 # Load Pretrained Models
-eta_model = joblib.load("eta_model_pickup.pkl")
-delay_model = joblib.load("delay_model_pickup.pkl")
+eta_model = joblib.load("xgboost_model_pickup.pkl")
+delay_model = joblib.load("logistic_regression_pickup.pkl")
+
 # Initialize Flask App
 app = Flask(__name__)
 
-# Feature columns (adjust according to your pipeline)
-feature_cols = ["speed_status_indexed", "pca1", "pca2", "pca3", "pca4", "pca5", "pca6", "pca7", "pca8", "pca9","pca10"]
+# Feature columns (according to your pipeline)
+feature_cols = ["speed_kmh", "city_order_count", "pickup_time_delay", "pickup_distance_km", 
+                "avg_pickup_time_minutes", "month", "cluster", "day_of_week", 
+                "pickup_order_count", "speed_status_indexed"]
 
 @app.route('/predict', methods=['POST'])
 def predict():
@@ -25,18 +21,15 @@ def predict():
         # Get JSON Data
         data = request.get_json()
         
-        # Extract Features
-        features = np.array([
-            data["speed_status_indexed"],
-            data["pca1"], data["pca2"], data["pca3"], data["pca4"], 
-            data["pca5"], data["pca6"], data["pca7"], data["pca8"], data["pca9"], data["pca10"]
-        ]).reshape(1, -1)  # Reshape for model
+        # Convert input data to NumPy array (1 row, 10 features)
+        features = np.array([[data[col] for col in feature_cols]])
 
-        # Predict Delay Probability (Logistic Regression)
+        # Predict Delay (Logistic Regression)
         delay_prediction = delay_model.predict(features)[0]  # 0 or 1
         
-        # Predict ETA (XGBoost)
-        eta_prediction = eta_model.predict(features)[0]  # Continuous value
+        # ✅ Convert NumPy array to XGBoost DMatrix before passing to eta_model
+        dmatrix_features = xgb.DMatrix(features)  
+        eta_prediction = eta_model.predict(dmatrix_features)[0]  # Continuous ETA value
         
         # Response
         response = {
